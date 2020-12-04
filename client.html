@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <title>ChatRoom App</title>
+   <style>
+      body {background-color: indianred; text-align: center;}
+      h1   {color: whitesmoke;}
+      p    {color: black;}
+      .userDisplay {text-align: right;}
+      .userOptions {text-align: right}
+      .left{text-align: left}
+      </style>
+
+   <script src="/socket.io/socket.io.js"></script>
+   <script>
+   //TO DO 
+   //finish unban
+   //formatting and commenting. 
+
+
+
+   let thisUser = {};       
+   let rooms = {};// make this a map of key = room name, to a value of all the users in that chat room 
+   let thisRoom = '';  
+   let users = []; 
+   let hasPassword = false; 
+      
+ 
+      var socketio = io.connect();
+      
+      //getting the message
+      socketio.on("message_to_client", function (data) {
+         console.log("sending message, array of users: " + rooms[thisRoom.name].roomUsers); 
+         //if we are in the correct room and have the correct password
+         if (thisRoom.name == data['roomName'] && hasPassword == true){
+            //Append an HR thematic break and the escaped HTML of the new message
+            document.getElementById("chatlog").appendChild(document.createElement("hr"));
+            document.getElementById("chatlog").appendChild(document.createTextNode(data['user'].name + ": "+ data['message']));
+         }
+      });
+
+      //receiving a private message
+      socketio.on("receive_private_message", function (data){
+
+         console.log("recipient: " + data['recipient'] + " and sender : "+ data['sender']); 
+        
+         //if this client is the message recipient
+         if (thisUser.name == data['recipient']){
+         //append the message to the DOM
+            document.getElementById("chatlog").appendChild(document.createElement("hr"));
+            document.getElementById("chatlog").appendChild(document.createTextNode("private message from "+ data['sender']+ ": " + data['message']));
+         }
+         //if this user is the sender, still append the message to the DOM
+         if (thisUser.name == data['sender']){
+            document.getElementById("chatlog").appendChild(document.createElement("hr"));
+            document.getElementById("chatlog").appendChild(document.createTextNode("you sent a private message to "+ data['recipient']+ ": " + data['message']));
+         }
+      });
+
+      //show the rooms to the client
+      function showAllRooms(){
+         document.getElementById("roomList").innerHTML=""; 
+         console.log("sending request to server ..."); 
+         //getting relevant information from the server
+         socketio.emit('show_all_rooms', {userLoggingIn: thisUser.name})
+
+         socketio.on("showing_rooms", function(data){
+            rooms = data['rooms']; 
+            //for each room
+            for (var item in rooms){
+               console.log(item); 
+               //make a room button and append it to the DOM
+               var roombutton = document.createElement("button"); 
+               roombutton.setAttribute("id", item); 
+               roombutton.append(document.createTextNode(item)); 
+               document.getElementById("roomList").appendChild(roombutton); 
+               console.log(rooms[item].name);
+               //when you click on the room, you will be transferred to it if you are not a banned user
+               document.getElementById(item).addEventListener('click', function(data){
+                  thisRoom = rooms[item]; 
+                  if (rooms[item].bannedUsers != ""){
+                     //if so, is thisUser.name one of them. 
+                     for (let n=0; n<rooms[item].bannedUsers.length; n++){
+                        if (thisUser.name == rooms[item].bannedUsers[n]){
+                           document.getElementById("roomList").append(document.createTextNode("You cannot join" +  item+", you have been banned")); 
+                           break; 
+                        }
+                     joinRoom(); 
+                     }
+                  }
+                  else{ // if not, join
+                        joinRoom(); 
+                     }
+
+               }, false);
+
+               }
+
+         }); 
+      }
+
+         //server request - send thisUser.name
+
+         //get back from the server an socket.to - for loop through all the rooms and display. 
+         //
+      
+
+      //sending newly created room to the server
+      socketio.on("send_new_room", function (data) {
+         //Append an HR thematic break and the escaped HTML of the new message
+         var buttn = document.createElement("button");
+         buttn.setAttribute("id", data["newRoom"].name);
+         buttn.append(document.createTextNode(data["newRoom"].name));
+         document.getElementById("roomList").appendChild(buttn)
+         rooms[data['newRoom'].name]= data['newRoom'];
+
+         document.getElementById(data["newRoom"].name).addEventListener("click", function(){ 
+         
+         thisRoom = data['newRoom']; 
+
+         //first, does room have any banned users?
+         if (rooms[thisRoom.name].bannedUsers != ""){
+            //if so, is thisUser.name one of them?
+            for (let n=0; n<rooms[thisRoom.name].bannedUsers.length; n++){
+               if (thisUser.name == rooms[thisRoom.name].bannedUsers[n]){
+                  document.getElementById("roomList").append(document.createTextNode("You cannot join" +  thisRoom.name+", you have been banned")); 
+                  break; 
+               }
+               joinRoom(); 
+            }
+         }
+         else{ // if not, join
+           joinRoom(); 
+         }
+}, false);
+      });
+
+      //sending the new room information back to the server
+      function setRoom(){
+         thisRoom= document.getElementById("new-room").value; 
+         let password = document.getElementById("roompassword").value; 
+         socketio.emit("create_new_room", {name:thisRoom, password:password, creator:thisUser}); 
+         //emit function - first parameter: create room --> server. set name and password & creator.
+      }
+
+      //making a new user, client side ("logging in")
+      function addUser() {
+         //showing relevant DOM information
+         document.getElementById("roomList").style.visibility = "visible";
+         document.getElementById("new-room").style.visibility = "visible";
+         document.getElementById("roompassword").style.visibility = "visible";
+         document.getElementById("createRoom").style.visibility = "visible";
+         document.getElementById("loginStuff").style.visibility="hidden"; 
+         //getting the user nickname input
+         var newUser = document.getElementById('nickname').value;
+         //setting the current user to be the new user
+         thisUser.name = newUser; 
+         thisUser.inRoom = ""; 
+         //sending the new user to the server
+         socketio.emit("new_user", { user:thisUser});
+         document.getElementById('nickname').value = ''; 
+         users[thisUser.name] = ""; 
+         //showing the new user the rooms
+         showAllRooms(); 
+
+      }
+
+      //initializing variables to use in leaveRoom
+      let roomArray = [];
+      let userToLeave = ''; 
+
+      //leaving a room, client side
+      function leaveRoom(){
+         //sending the relevant information to the server
+         socketio.emit('send_leave_room', {room: thisRoom.name, userLeaving: userToLeave}); 
+         //once they've left the room, send the new array of users back to the server
+         socketio.on('left_room', function(data){
+         rooms[thisRoom.name].roomUsers = data['roomUsersArray']; 
+         document.getElementById("enterChat").innerHTML = "";
+         //updating the room 
+         useRoom(); 
+         }); 
+      }
+
+      //letting the client know they got kicked out
+      socketio.on('you_are_kicked_out', function(data){
+         //displaying the "lobby" information
+         document.getElementById("new-room").style.visibility = "visible";
+         document.getElementById("roompassword").style.visibility = "visible";
+         document.getElementById("createRoom").style.visibility = "visible";
+
+         console.log("YOU GOT KICKED OUT"); 
+         //hiding the in-room information
+         document.getElementById("roomList").style.visibility = "visible";
+         document.getElementById("leaveRoom").innerHTML = ""; 
+         document.getElementById("userDisplay").innerHTML = "";
+         document.getElementById("sendMessageDiv").style.visibility = "hidden";
+         document.getElementById("userOptions").innerHTML = "";
+         document.getElementById("userOptions").style.visibility = "hidden";
+
+
+         document.getElementById("chatlog").innerHTML = ""; 
+         document.getElementById("chatlog").style.visibility = "hidden"; 
+
+         document.getElementById("enterChat").style.visibility = "hidden"; 
+         document.getElementById("enterChat").innerHTML = ""; 
+      })
+
+
+      //joining a room
+      function joinRoom(){     
+
+         //if room has a password. 
+         if (thisRoom.password!="") {
+            //showing the user the required credentials
+            console.log("joining room"); 
+            document.getElementById("chatlog").appendChild(document.createElement("br"))
+            let tryingPassword = ""
+            document.getElementById("chatlog").innerHTML = ""; 
+            document.getElementById("enterChat").innerHTML = ""; 
+            document.getElementById("enterChat").style.visibility = "visible"; 
+            let pass = document.createElement("input"); 
+            pass.setAttribute("type", "password"); 
+            pass.setAttribute("id", "tryPassword"); 
+            pass.setAttribute("placeholder", "chatroom password")
+            document.getElementById("enterChat").appendChild(pass);
+            let submit = document.createElement("button"); 
+            submit.appendChild(document.createTextNode("submit")); 
+            submit.setAttribute("id", "passwordSubmit"); 
+            document.getElementById("enterChat").appendChild(submit);
+
+         //event listener for once they've submitted the password
+         document.getElementById("passwordSubmit").addEventListener("click", 
+         function(){
+            tryingPassword = document.getElementById("tryPassword").value;
+            if(tryingPassword == thisRoom.password){
+               //they've submitted the right password, hide all the lobby elements
+               document.getElementById("new-room").style.visibility = "hidden";
+               document.getElementById("roompassword").style.visibility = "hidden";
+               document.getElementById("createRoom").style.visibility = "hidden";
+               document.getElementById("roomList").style.visibility = "hidden"; 
+               let leaveButton = document.createElement('button'); 
+               leaveButton.setAttribute("id", "leaveButton"); 
+               leaveButton.append(document.createTextNode("Leave Room")); 
+               document.getElementById("leaveRoom").appendChild(leaveButton); 
+               //if they click the leave room button, we call leaveRoom
+               document.getElementById("leaveButton").addEventListener('click', function(){
+                  userToLeave = thisUser.name; 
+                  leaveRoom(); 
+               }, false); 
+               document.getElementById("enterChat").style.visibility = "hidden"; 
+               document.getElementById("enterChat").innerHTML = ""; 
+         
+               //sending the room user back to the server
+               users[thisUser.name] = thisRoom.name;         
+               socketio.emit("add_room_user", {roomName:thisRoom.name, user:thisUser}); 
+         
+               socketio.on("send_room_users", function (data) {
+                  console.log("sent the room users");
+                  if (rooms[data['roomName']]!=null){
+                     rooms[data['roomName']].roomUsers = data['roomUsers'];
+                  }
+                  else {
+                     rooms[data['roomName']]= data['roomUsers']; 
+                  }
+                  //call displaying the relevant information  
+                  useRoom();
+               }); 
+            }
+            else{//if the password was incorrect
+               document.getElementById("enterChat").append(document.createTextNode("INCORRECT PASSWORD")); 
+            } 
+         },
+         false);
+      }
+      else{
+         //the room does not have a password
+         document.getElementById("new-room").style.visibility = "hidden";
+         document.getElementById("roompassword").style.visibility = "hidden";
+         document.getElementById("createRoom").style.visibility = "hidden";
+
+         document.getElementById("enterChat").style.visibility = "hidden"; 
+         document.getElementById("enterChat").innerHTML = ""; 
+
+         document.getElementById("roomList").style.visibility = "hidden"; 
+         let leaveButton = document.createElement('button'); 
+         leaveButton.setAttribute("id", "leaveButton"); 
+   
+         leaveButton.append(document.createTextNode("Leave Room")); 
+         document.getElementById("leaveRoom").appendChild(leaveButton); 
+         document.getElementById("leaveButton").addEventListener('click', function(){
+            userToLeave = thisUser.name; 
+            leaveRoom()}, false); 
+             //sending the room user back to the server
+             users[thisUser.name] = thisRoom.name;         
+               socketio.emit("add_room_user", {roomName:thisRoom.name, user:thisUser}); 
+         
+               socketio.on("send_room_users", function (data) {
+                  console.log("sent the room users");
+                  if (rooms[data['roomName']]!=null){
+                     rooms[data['roomName']].roomUsers = data['roomUsers'];
+                  }
+                  else {
+                     rooms[data['roomName']]= data['roomUsers']; 
+                  }
+                  //call displaying the relevant information  
+                  useRoom();
+               }); 
+
+
+
+         }
+
+      }
+
+      //if the user disconnects
+      socketio.on('user_disconnect', function(data){  
+         rooms[data['roomName']].roomUsers = data['roomUsers'];
+         showUsers(); 
+      }); 
+
+      //for the admin to delete a room
+      function deleteRoom() {
+         //send some stuff to serveer.
+      }
+         
+      //constructs the room for the user
+      function useRoom(){
+         hasPassword= true; 
+         let canUseRoom = false; 
+         //if the user is in the room list, the canUseRoom is set to true
+         for (let j=0; j<rooms[thisRoom.name].roomUsers.length; j++){
+            if (thisUser.name == rooms[thisRoom.name].roomUsers[j]){
+               canUseRoom = true; 
+            }
+         }
+         //if they can use the room, show them the room elements
+         if (canUseRoom){
+            document.getElementById("enterChat").style.visibility = "hidden";
+            document.getElementById("sendMessageDiv").style.visibility = "visible"; 
+            document.getElementById("userDisplay").style.visibility = "visible";
+            document.getElementById("chatlog").style.visibility = "visible";
+
+
+            document.getElementById("userDisplay").innerHTML = ""; 
+            document.getElementById("userDisplay").appendChild(document.createElement("hr"));
+            document.getElementById("userDisplay").appendChild(document.createTextNode("you are now in the chatroom " + thisRoom.name + ", admin:  "+ rooms[thisRoom.name].creator.name));
+
+            document.getElementById("userDisplay").appendChild(document.createTextNode(", other users in the chatroom: "));
+            document.getElementById("userDisplay").appendChild(document.createElement("br"));
+            showUsers(); 
+         }
+         
+      }
+
+         //this function displays all the users currently in a room
+         function showUsers(){   
+            //for each user, this loop creates a button and appends it to the DOM      
+            for (let i=0; i<rooms[thisRoom.name].roomUsers.length; i++){
+               let btn = document.createElement("button"); 
+               btn.append(document.createTextNode(rooms[thisRoom.name].roomUsers[i])); 
+               btn.setAttribute("id", "user"+rooms[thisRoom.name].roomUsers[i]); 
+               document.getElementById("userDisplay").appendChild(btn); 
+
+               document.getElementById("user"+rooms[thisRoom.name].roomUsers[i]).addEventListener("click", function(){
+                  //if you click on a user, this provides a list of options
+                  document.getElementById("userOptions").innerHTML = ""; 
+                  let kickOut = document.createElement("button"); 
+                  let ban = document.createElement("button"); 
+                  let transferAdmin = document.createElement("button"); 
+                  transferAdmin.setAttribute("id", "transferAdmin"+rooms[thisRoom.name].roomUsers[i]);
+                  kickOut.setAttribute("id", "kickout"+rooms[thisRoom.name].roomUsers[i]); 
+                  ban.setAttribute("id", "ban"+rooms[thisRoom.name].roomUsers[i]); 
+                  transferAdmin.append(document.createTextNode("Make Admin"));
+                  kickOut.append(document.createTextNode("Kick Out User")); 
+                  ban.append(document.createTextNode("Ban User")); 
+                  let privateMessage =  document.createElement("button"); 
+                  privateMessage.append(document.createTextNode("Message User")); 
+                  privateMessage.setAttribute("id", "pm"+rooms[thisRoom.name].roomUsers[i]);
+                  document.getElementById("userOptions").append(document.createTextNode("user selected: "+ rooms[thisRoom.name].roomUsers[i])); 
+                  //if the user is the admin, then they get to view all the options
+                  if (thisUser.name == thisRoom.creator.name){
+                     kickOut.style.visibility = "visible"; 
+                     ban.style.visibility = "visible"; 
+                     transferAdmin.style.visibility = "visible"; 
+                     privateMessage.style.visibility= "visible";  
+
+                  }
+                  else {//this calls if the user is not the admin
+                     kickOut.style.visibility = "hidden"; 
+                     ban.style.visibility = "hidden"; 
+                     transferAdmin.style.visibility = "hidden"; 
+                     privateMessage.style.visibility = "visible"; 
+                  }
+                  //actually append the buttons to the DOM now
+                  document.getElementById("userOptions").appendChild(kickOut);
+                  document.getElementById("userOptions").appendChild(ban);
+                  document.getElementById("userOptions").appendChild(privateMessage);
+                  document.getElementById("userOptions").appendChild(transferAdmin);
+
+                  //event listener for if the admin bans a user
+                  document.getElementById("ban"+rooms[thisRoom.name].roomUsers[i]).addEventListener('click', function(){
+                     userToLeave = rooms[thisRoom.name].roomUsers[i]; 
+                     leaveRoom(); 
+                     socketio.emit('ban_user', {bannedUser: rooms[thisRoom.name].roomUsers[i], room: thisRoom.name}); 
+                  }, false); 
+                  
+                  //event listener for if the admin kicks out a user
+                  document.getElementById("kickout"+rooms[thisRoom.name].roomUsers[i]).addEventListener('click',function(){
+                     userToLeave = rooms[thisRoom.name].roomUsers[i]; 
+                     leaveRoom(); 
+                     useRoom(); 
+                  } ,false);
+
+                  //event listener for if the admin wants to transfer administrative power
+                  document.getElementById("transferAdmin"+rooms[thisRoom.name].roomUsers[i]).addEventListener('click', function (data){
+                  //send the room, and the new admin back to the server.
+                  console.log("new admin  = "+rooms[thisRoom.name].roomUsers[i]);
+                  socketio.emit("transfer_admin", {newAdmin:rooms[thisRoom.name].roomUsers[i], room: thisRoom});
+               });
+                  //event listener for if anyone wants to private message someone else
+                  document.getElementById('pm'+rooms[thisRoom.name].roomUsers[i]).addEventListener('click', function(data){
+                     showPrivateMessage(rooms[thisRoom.name].roomUsers[i]); 
+                  });
+               }, false); 
+
+      }
+         
+      //sending the new admin back to the server
+      socketio.on('send_new_admin', function(data){
+         rooms[thisRoom.name].creator.name = data['room'].creator; 
+         console.log("room name: "+ thisRoom.name + " admin : "+ rooms[thisRoom.name].creator.name); 
+         useRoom(); 
+         });      
+      }
+
+      //sending the new banned user list back to the server
+      socketio.on('user_banned', function(data){
+         room = data['room']; 
+         rooms[room].bannedUsers = data['bannedArray']; 
+         rooms[room].roomUsers = data['roomUsers'];
+         console.log(rooms[room].roomUsers);
+         unBan(); 
+         useRoom();  
+         //update the array on this side. 
+      }); 
+
+      //this function unbans a user, which is a power only the admin has
+      function unBan(){
+         if (thisUser.name == thisRoom.creator.name){
+
+         
+         console.log("trying to unban"); 
+         //make a list in the room of banned users
+         document.getElementById("bannedUsers").innerHTML = ""; 
+         document.getElementById("bannedUsers").append(document.createTextNode("Banned Users: "));
+
+         if (rooms[thisRoom.name].bannedUser == ""){
+            document.getElementById("bannedUsers").append(document.createTextNode("No Banned Users"));
+         }
+         else{
+         //iterate through banned users.   
+         for (let b=0; b<rooms[thisRoom.name].bannedUsers.length; b++){
+            let unBan = document.createElement("button"); 
+            unBan.append(document.createTextNode("Unban "+rooms[thisRoom.name].bannedUsers[b])); 
+            unBan.setAttribute("id", "unban"+rooms[thisRoom.name].bannedUsers[b]); 
+            document.getElementById("bannedUsers").appendChild(unBan); 
+            //event listener for if the admin wants to unban someone
+            document.getElementById("unban"+rooms[thisRoom.name].bannedUsers[b]).addEventListener("click", function(){
+               console.log("clicked!! user to unban = " + rooms[thisRoom.name].bannedUsers[b]); 
+               // document.getElementById("bannedUsers").innerHTML =""; 
+               socketio.emit("unban_user", {room: thisRoom.name, userToUnban: rooms[thisRoom.name].bannedUsers[b]}); 
+            }, false); 
+         }
+      }
+         //append all banned users to the dom. 
+        
+
+         //onCLick send message to server to delete them from banned list. 
+         //send back to the unbanned user . 
+      }
+      }
+
+      //sets the new banned user list, client side
+      socketio.on("user_unbanned", function(data){
+         rooms[thisRoom.name].bannedUsers = data['bannedUsers']; 
+         console.log("BANNED USERs: " + rooms[thisRoom.name].bannedUsers); 
+         // showAllRooms(); 
+         useRoom();
+         unBan();
+
+      });
+      
+      socketio.on("you_were_unbanned", function(data){
+         rooms[thisRoom.name].bannedUsers = data['bannedUsers']; 
+
+         // showAllRooms(); 
+         useRoom(); 
+
+      }); 
+      
+      //shows the user the private message
+      function showPrivateMessage(recipient){
+         //create the necessary DOM elements
+         pmText = document.createElement("input"); 
+         pmText.setAttribute("type", "text"); 
+         pmText.setAttribute("id", "pmContent"); 
+         document.getElementById("privatechat").appendChild(pmText); 
+         pmButton = document.createElement("button"); 
+         pmButton.append(document.createTextNode("Send Private Message to "+ recipient)); 
+         pmButton.setAttribute("id", "sendPM"); 
+         document.getElementById("privatechat").appendChild(pmButton); 
+         document.getElementById("privatechat").appendChild(document.createElement("hr")); 
+         //event listener for when the private message is sent
+         document.getElementById("sendPM").addEventListener('click', function(){
+            let message = document.getElementById("pmContent").value; 
+            console.log("sender = " + thisUser.name); 
+            socketio.emit("send_private_message", {sender: thisUser.name, recipient:recipient, room: thisRoom.name, message:message});
+            document.getElementById("privatechat").innerHTML = "";  
+         }, false); 
+      }
+
+
+      //generic send message function
+      function sendMessage() {
+         if (thisRoom != "id") {
+            let isInRoom = false; 
+            //determine if thisUser is in thisRoom
+            for (let j=0; j<rooms[thisRoom.name].roomUsers.length; j++){
+               if (thisUser.name == rooms[thisRoom.name].roomUsers[j]){
+                  isInRoom = true; 
+               }
+            }
+            //if they are, then get the message input from the server and display it on the DOM
+            if (isInRoom){
+               var msg = document.getElementById("message_input").value;
+               socketio.emit("message_to_server", {message: msg, sendingUser:thisUser , room:thisRoom});
+               document.getElementById("message_input").value = "";
+            }
+            else {
+               document.getElementById("chatlog").appendChild(document.createTextNode("CANNOT SEND MESSAGE YOURE KICKED OUT :(")); 
+               useRoom(); 
+            }
+
+        
+         }
+         
+         
+
+      }
+
+   </script>
+
+</head>
+
+
+   <body>
+      <h1>Zoombomber support group</h1>
+      <br>
+      <link rel="stylesheet" href="prettyChat.css"> 
+
+      <div id="loginStuff">
+         <input type="text" id="nickname" placeholder="nickname">
+         <button id="showButton" onclick="addUser()">Login</button>
+      </div>
+      <input type="text" id="new-room" placeholder="name your room" style="visibility: hidden;">
+      <input type="password" id="roompassword" placeholder="create a password" style="visibility: hidden;">
+      <button id = "createRoom" onclick="setRoom()" style="visibility: hidden;">Create Chat Room</button>
+      <div id="roomList" style="visibility: hidden;"></div>
+      <div id = "leaveRoom"></div>
+      <br>
+      <div id="chat1"></div>
+      <div id="userDisplay" class="userDisplay" style= "visibility: hidden;"></div>
+      <div id="userOptions" class="userOptions"></div>
+      <div id="sendMessageDiv" style="visibility: hidden">
+         <div id="privatechat"></div>
+         <input type="text" id="message_input" />
+         <br>
+         <button onclick="sendMessage()">send</button>
+         <div id="roomTitle"></div>
+         <br>
+         <br>
+      </div>
+      <div id="enterChat"></div>
+      <div id="chatlog"></div>
+      <div id="bannedUsers" class="left"></div>
+   </body>
+
+
+</html>
