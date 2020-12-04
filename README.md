@@ -1,6 +1,6 @@
 # CSE330
-458234
-466259
+Chat room application created using socket.io for the creative programming and rapid prototype development course. 
+class partner and collaborator: Samm Keiser.
 
 Important thing to know while grading:
 - When in a room, if you want to see "user options" (send private message, ban, etc), you need to click on the button with that user's name on it. 
